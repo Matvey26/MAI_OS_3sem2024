@@ -1,24 +1,58 @@
-#include <unistd.h>     // fork, execve, pipe, dup2
-#include <sys/wait.h>   // waitpid
-#include <fcntl.h>      // open, O_CREAT, O_WRONLY
-#include <stdio.h>      // printf, perror
-#include <stdlib.h>     // exit
-#include <sys/types.h>  // pid_t
-#include <string>       // std::string
-#include <cstring>      // strlen, strcspn
-#include <iostream>     // std::cout, std::cin
+#include <iostream>
+#include <string>
+#include <unistd.h> 
+#include <sys/wait.h>
+#include <cstring>
 
 int main() {
+    // fd для передачи данных от родителя к дочернему процессу
+    int fd[2];
+    if (pipe(fd) == -1) {
+        perror("Ошибка при создании pipe");
+        return 1;
+    }
+
+    std::string output_file;
+    std::cout << "Введите название файла для вывода результата: ";
+    std::getline(std::cin, output_file);
+
     pid_t pid = fork();
+    if (pid == -1) {
+        perror("Ошибка при fork()");
+        return 1;
+    }
 
     if (pid == 0) {
-        char* argv[] = {"./child", NULL};  // Программа для execve
-        execve("./child", NULL, NULL);
+        // Дочерний процесс
+        close(fd[1]);  // Закрываем сторону записи в pipe
 
-        perror("Ошибка execve");
+        // Подготовка аргументов для execve
+        char pipe_read_fd[10], file_name_arg[256];
+        sprintf(pipe_read_fd, "%d", fd[0]);
+        strcpy(file_name_arg, output_file.c_str());
+
+        // Аргументы для execve
+        char *args[] = {"./child", pipe_read_fd, file_name_arg, NULL};
+
+        // Выполняем дочернюю программу
+        execve("./child", args, NULL);
+        perror("execve");
         exit(1);
     } else {
-        std::cout << "Parent process!\n";
+        // Родительский процесс
+        close(fd[0]);
+
+        // Ввод чисел
+        std::string input_data;
+        std::cout << "Введите числа через пробел: ";
+        std::getline(std::cin, input_data);
+
+        write(fd[1], input_data.c_str(), input_data.size());
+        close(fd[1]);
+
+        // Ожидаем завершения дочернего процесса
+        wait(NULL);
     }
+
     return 0;
 }

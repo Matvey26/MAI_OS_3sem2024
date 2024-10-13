@@ -77,7 +77,7 @@ int main(int argc, char* argv[]) {
     pthread_mutex_init(&mutex, NULL);
 
     size_t num_threads = (k < threads_numbers) ? k : threads_numbers;
-    pthread_t* threads = (pthread_t*)malloc(sizeof(pthread_t) * num_threads);`
+    pthread_t* threads = (pthread_t*)malloc(sizeof(pthread_t) * num_threads);
     ThreadData* th_data = (ThreadData*)malloc(sizeof(ThreadData) * num_threads);
 
     size_t cur_array = 0;

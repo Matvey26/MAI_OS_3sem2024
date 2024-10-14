@@ -101,7 +101,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    printf("%d", result);
+    // printf("%d", result);
 
     pthread_mutex_destroy(&mutex);
     free(th_data);

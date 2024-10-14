@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 int** read_data(const char* path, size_t* k, size_t* m) {
     FILE* file = fopen(path, "r");
@@ -41,12 +42,17 @@ typedef struct {
     pthread_mutex_t* mutex;
 } ThreadData;
 
+int get_element_from_array(int* arr, size_t i) {
+    // return arr[i];
+    return rand() % 201 - 100;
+}
+
 void* sum_array(void* arg) {
     ThreadData* data = (ThreadData*)arg;
     int local_sum = 0;
 
     for (size_t i = 0; i < data->size; ++i) {
-        local_sum += data->array[i];
+        local_sum += get_element_from_array(data->array, i);
     }
 
     pthread_mutex_lock(data->mutex);
@@ -58,19 +64,14 @@ void* sum_array(void* arg) {
 
 int main(int argc, char* argv[]) {
     if (argc < 3) {
-        fprintf(stderr, "Usage: %s <test name> <number of threads>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <number of arrays> <length of arrays> <number of threads>\n", argv[0]);
         return 1;
     }
 
-    char input_filename[256], output_filename[256];
-    snprintf(input_filename, sizeof(input_filename), "tests/%s_inp.txt", argv[1]);
-    snprintf(output_filename, sizeof(output_filename), "tests/%s_out.txt", argv[1]);
+    size_t threads_numbers = atoi(argv[3]);
 
-    size_t threads_numbers = atoi(argv[2]);
-
-    size_t k, m;
-    int** data = read_data(input_filename, &k, &m);
-    if (data == NULL) return 1;
+    size_t k = atoll(argv[1]);
+    size_t m = atoll(argv[2]);
 
     int result = 0;
     pthread_mutex_t mutex;
@@ -82,8 +83,9 @@ int main(int argc, char* argv[]) {
 
     size_t cur_array = 0;
     while (cur_array < k) {
-        for (size_t i = 0; i < num_threads && cur_array < k; ++i, ++cur_array) {
-            th_data[i].array = data[cur_array];
+        size_t i = 0;
+        for (; i < num_threads && cur_array < k; ++i, ++cur_array) {
+            th_data[i].array = NULL;
             th_data[i].size = m;
             th_data[i].result = &result;
             th_data[i].mutex = &mutex;
@@ -93,24 +95,15 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        for (size_t i = 0; i < num_threads; ++i) {
-            pthread_join(threads[i], NULL);
+        // Ожидание завершения всех созданных потоков
+        for (size_t j = 0; j < i; ++j) {
+            pthread_join(threads[j], NULL);
         }
     }
 
-    FILE* output_file = fopen(output_filename, "w");
-    if (output_file == NULL) {
-        perror("Error opening output file");
-        return 1;
-    }
-    fprintf(output_file, "%d", result);
-    fclose(output_file);
+    printf("%d", result);
 
     pthread_mutex_destroy(&mutex);
-    for (size_t i = 0; i < k; ++i) {
-        free(data[i]);
-    }
-    free(data);
     free(th_data);
     free(threads);
 

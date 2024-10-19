@@ -36,14 +36,15 @@ int** read_data(const char* path, size_t* k, size_t* m) {
 }
 
 typedef struct {
-    int* array;
+    int** arrays;
+    size_t num_arrays;
     size_t size;
     int* result;
     pthread_mutex_t* mutex;
 } ThreadData;
 
-int get_element_from_array(int* arr, size_t i) {
-    // return arr[i];
+int get_element_from_2d_array(int** arrs, size_t i, size_t j) {
+    // return arrs[i][j];
     return rand() % 201 - 100;
 }
 
@@ -51,8 +52,10 @@ void* sum_array(void* arg) {
     ThreadData* data = (ThreadData*)arg;
     int local_sum = 0;
 
-    for (size_t i = 0; i < data->size; ++i) {
-        local_sum += get_element_from_array(data->array, i);
+    for (size_t i = 0; i < data->num_arrays; ++i) {
+        for (size_t j = 0; j < data->size; ++j) {
+            local_sum += get_element_from_2d_array(data->arrays, i, j);
+        }
     }
 
     pthread_mutex_lock(data->mutex);
@@ -81,24 +84,29 @@ int main(int argc, char* argv[]) {
     pthread_t* threads = (pthread_t*)malloc(sizeof(pthread_t) * num_threads);
     ThreadData* th_data = (ThreadData*)malloc(sizeof(ThreadData) * num_threads);
 
-    size_t cur_array = 0;
-    while (cur_array < k) {
-        size_t i = 0;
-        for (; i < num_threads && cur_array < k; ++i, ++cur_array) {
-            th_data[i].array = NULL;
-            th_data[i].size = m;
-            th_data[i].result = &result;
-            th_data[i].mutex = &mutex;
-            if (pthread_create(&threads[i], NULL, sum_array, &th_data[i]) != 0) {
-                perror("Error creating thread");
-                return 1;
-            }
+    size_t arrays_number_for_thread = (k / num_threads) + (k % num_threads);
+    size_t rest_arrays = k;
+    for (size_t i = 0; i < num_threads; ++i) {
+        // th_data[i].arrays = arrays + i * arrays_number_for_thread;
+        th_data[i].arrays = NULL;
+        if (rest_arrays < arrays_number_for_thread) {
+            th_data[i].num_arrays = rest_arrays;
+        } else {
+            th_data[i].num_arrays = arrays_number_for_thread;
         }
 
-        // Ожидание завершения всех созданных потоков
-        for (size_t j = 0; j < i; ++j) {
-            pthread_join(threads[j], NULL);
+        th_data[i].size = m;
+        th_data[i].result = &result;
+        th_data[i].mutex = &mutex;
+        if (pthread_create(&threads[i], NULL, sum_array, &th_data[i]) != 0) {
+            perror("Error creating thread");
+            return 1;
         }
+    }
+
+    // Ожидание завершения всех созданных потоков
+    for (size_t i = 0; i < num_threads; ++i) {
+        pthread_join(threads[i], NULL);
     }
 
     // printf("%d", result);

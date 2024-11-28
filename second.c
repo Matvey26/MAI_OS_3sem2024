@@ -1,8 +1,6 @@
 #include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "include/gcd_euclid.c"
-#include "include/integral_rectangle.c"
 
 float (*integral)(float, float, float);
 int (*gcd)(int, int);
@@ -40,7 +38,6 @@ void load_libraries() {
         handle_gcd = dlopen("./libraries/libgcd_euclid.so", RTLD_LAZY);
         handle_integral = dlopen("./libraries/libintegral_trapezoid.so", RTLD_LAZY);
     }
-    printf("Libraries was readed\n");
 
     if (!handle_gcd) {
         fprintf(stderr, "%s\n", dlerror());
@@ -54,22 +51,21 @@ void load_libraries() {
 
     integral = dlsym(handle_integral, "SinIntegral");
     gcd = dlsym(handle_gcd, "GCD");
-}
 
-void close_libraries() {
     char* error = dlerror();
     if (error != NULL) {
         fprintf(stderr, "%s\n", error);
         exit(1);
     }
+}
 
+void close_libraries() {
     dlclose(handle_gcd);
     dlclose(handle_integral);
-    exit(1);
 }
 
 int main() {
     load_libraries();
-    close_libraries();
     solve();
+    close_libraries();
 }

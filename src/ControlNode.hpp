@@ -61,7 +61,7 @@ private:
     std::string bind(int parent_id, const std::string& side, const std::string& bind_port) {
         std::string ping_response = ping(std::to_string(parent_id));
         if (ping_response != "Ok: 1") {
-            return ping_response;
+            return "Error: Node is unavailable";
         }
 
         return request_helper(std::to_string(parent_id), "bind", {side, bind_port});
@@ -125,7 +125,7 @@ private:
     std::string exec(const std::string& id, const std::string& args) {
         std::string ping_response = ping(id);
         if (ping_response != "Ok: 1") {
-            return ping_response;
+            return "Error:" + id + ": Node is unavailable";
         }
     
         return request_helper(id, "exec", {args});
@@ -192,7 +192,13 @@ public:
     , futures()
     , running(true)
     {
-        socket.connect("tcp://localhost:" + port);
+        socket.bind("tcp://*:" + port);
+
+        // Устанавливаем параметры сокета
+        socket.set(zmq::sockopt::linger, 2000);   // Удаление сообщений, если отправить нельзя
+        socket.set(zmq::sockopt::rcvtimeo, 2000); // Тайм-аут на прием
+        socket.set(zmq::sockopt::sndtimeo, 2000); // Тайм-аут на отправку
+
     }
 
     void run() {
@@ -201,6 +207,8 @@ public:
         };
 
         while (running) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
             // Опрашиваем сокет на наличие сообщений
             int events = zmq::poll(items, 1, std::chrono::milliseconds(0)); // Немедленное возвращение
             if (events < 0) {
@@ -211,7 +219,7 @@ public:
             if (items[0].revents & ZMQ_POLLIN) {
                 std::optional<std::string> message = Receive(socket);
                 if (message.has_value()) {
-                    std::cout << "Processing system message: " << message.value() << std::endl;
+                    // std::cout << "Processing system message: " << message.value() << std::endl;
                     process_incoming_message(message.value());
                 } else {
                     std::cerr << "Failed to receive message" << std::endl;
@@ -227,7 +235,7 @@ public:
                 std::string request;
                 std::getline(std::cin, request);
 
-                std::cout << "Processing user request: " << request << std::endl;
+                // std::cout << "Processing user request: " << request << std::endl;
                 process_user_command(request);
             }
         }
@@ -239,9 +247,19 @@ public:
 
 
     ~ControlNode() {
-        std::cout << "Destroing System..." << std::endl;
-        Send(socket, "recursive_destroy");
-        socket.disconnect("tcp://localhost:" + port);
+        std::cout << "Destroying System..." << std::endl;
+
+        try {
+            if (socket.handle() != nullptr) {
+                Send(socket, "recursive_destroy");
+                // socket.disconnect("tcp://localhost:" + port);
+                socket.close(); // Закрытие сокета
+            }
+        } catch (const zmq::error_t& e) {
+            std::cerr << "Error while destroying ControlNode: " << e.what() << std::endl;
+        }
+
+        context.close(); // Закрытие контекста
         std::cout << "System destroyed." << std::endl;
     }
 };

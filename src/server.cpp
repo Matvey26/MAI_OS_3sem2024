@@ -1,7 +1,14 @@
-#include "ControlNode.hpp"
+#include "TreeNode.hpp"
 
-int main() {
-    ControlNode controller("1024");
+int main(int argc, char* argv[]) {
+    // Разбираем параметры
+    int id = atoi(argv[0]);
+    std::string parent_port(argv[1]);
 
-    controller.run();
+    // Создаём объект вычислительного узла
+    TreeNode node(id);
+    node.setup_parent_socket(parent_port);
+
+    // Запускаем его
+    node.run();
 }

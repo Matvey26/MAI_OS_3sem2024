@@ -8,6 +8,8 @@
 #include <string>
 #include <future>
 #include <stdexcept>
+#include <thread>
+#include <chrono>
 
 #include "SocketCommunication.hpp"
 #include "SusBinHeap.hpp"
@@ -30,41 +32,39 @@ private:
     bool running;  // Для включения/выключения
 
 private:
-    std::string ping(const std::string& id) {
+    std::string request_helper(const std::string& id, const std::string& cmd, const std::vector<std::string>& params) {
         if (!topology.find(std::stoi(id))) {
             return "Error: Not found";
         }
-
         int req_id = generate_request_id();
         std::string path = topology.get_path_to(std::stoi(id));
-        std::string message = join({std::to_string(req_id), "ping", path, id}, ";");
+
+        std::vector<std::string> all_params = {std::to_string(req_id), cmd, path, id};
+        all_params.insert(all_params.end(), params.begin(), params.end());
+        std::string message = join(all_params, ";");
 
         std::promise<std::string> promise;
         std::future<std::string> future = promise.get_future();
         request_promise_map[req_id] = std::move(promise);
 
-        Send(socket, message);
-
-        // Ожидание 30 секунд
-        if (future.wait_for(std::chrono::seconds(5)) == std::future_status::timeout) {
-            return "Ok: 0";
+        if (!Send(socket, message)) {
+            return "Error: Failed " + cmd;
         }
 
         return future.get();
     }
 
-    std::string bind(int parent_id, const std::string& side) {
-         int req_id = generate_request_id();
-        std::string path = topology.get_path_to(parent_id);
-        std::string message = join({std::to_string(req_id), "bind", path, side, std::to_string(parent_id)}, ";");
+    std::string ping(const std::string& id) {
+        return request_helper(id, "ping", {});
+    }
 
-        std::promise<std::string> promise;
-        std::future<std::string> future = promise.get_future();
-        request_promise_map[req_id] = std::move(promise);
+    std::string bind(int parent_id, const std::string& side, const std::string& bind_port) {
+        std::string ping_response = ping(std::to_string(parent_id));
+        if (ping_response != "Ok: 1") {
+            return ping_response;
+        }
 
-        Send(socket, message);
-
-        return future.get();
+        return request_helper(std::to_string(parent_id), "bind", {side, bind_port});
     }
 
     std::string create(const std::string& id) {
@@ -97,10 +97,9 @@ private:
         }
 
         // Отправляем родителю сообщение, чтобы он забиндил свой сокет на нужный порт
-        std::cout << "Binding..." << std::endl;
         if (parent_port != port) {
             std::string side = (topology.is_left_child(iid) ? "left" : "right");
-            std::string bind_response = bind(topology.get_parent_id(iid), side);
+            std::string bind_response = bind(topology.get_parent_id(iid), side, parent_port);
 
             if (bind_response == "Error") {
                 return "Error: Parent cant bind " + side + " socket to port " + parent_port;
@@ -114,7 +113,7 @@ private:
         }
         if (pid == 0) {
             // Дочерний процесс
-            execl("client", id.c_str(), parent_port.c_str(), NULL);
+            execl("./src/server", id.c_str(), parent_port.c_str(), NULL);
 
             return "Error: The computing node process has not started";
         } else {
@@ -124,7 +123,12 @@ private:
     }
 
     std::string exec(const std::string& id, const std::string& args) {
-        return "some exec";
+        std::string ping_response = ping(id);
+        if (ping_response != "Ok: 1") {
+            return ping_response;
+        }
+    
+        return request_helper(id, "exec", {args});
     }
 
     // Обработка пользовательских команд
@@ -145,16 +149,14 @@ private:
                     std::cout << create(id) << std::endl;
                 }
             ));
-        }
-        if (cmd == "ping") {
+        } else if (cmd == "ping") {
             futures.push_back(std::async(
                 std::launch::async,
                 [this, id](){
                     std::cout << ping(id) << std::endl;
                 }
             ));
-        }
-        if (cmd == "exec") {
+        } else if (cmd == "exec") {
             std::string args;
             std::getline(iss, args);
             futures.push_back(std::async(
@@ -163,6 +165,20 @@ private:
                     std::cout << exec(id, args) << std::endl;
                 }
             ));
+        } else {
+            std::cout << "Unknown command" << std::endl;
+        }
+    }
+
+    // Обработка сообщенинй от системы
+    void process_incoming_message(const std::string& message) {
+        std::vector<std::string> tokens = split(message, ';');
+        int request_id = std::stoi(tokens[0]);
+        std::string answer = tokens[1];
+
+        if (request_promise_map.count(request_id)) {
+            request_promise_map[request_id].set_value(answer);
+            request_promise_map.erase(request_id);
         }
     }
 
@@ -171,36 +187,61 @@ public:
     : topology()
     , context(1)
     , port(port)
-    , socket(context, zmq::socket_type::pair)
+    , socket(context, ZMQ_PAIR)
     , request_promise_map()
     , futures()
     , running(true)
     {
-        socket.bind("tcp://*:" + port);
+        socket.connect("tcp://localhost:" + port);
     }
 
     void run() {
+        zmq::pollitem_t items[] = {
+            {socket, 0, ZMQ_POLLIN, 0}
+        };
+
         while (running) {
-            // Обработка сообщений от узлов
-            while (true) {
+            // Опрашиваем сокет на наличие сообщений
+            int events = zmq::poll(items, 1, std::chrono::milliseconds(0)); // Немедленное возвращение
+            if (events < 0) {
+                std::cerr << "zmq::poll failed" << std::endl;
+                continue;
+            }
+
+            if (items[0].revents & ZMQ_POLLIN) {
                 std::optional<std::string> message = Receive(socket);
                 if (message.has_value()) {
-                    std::cout << "Message from node: " << *message << std::endl;
+                    std::cout << "Processing system message: " << message.value() << std::endl;
+                    process_incoming_message(message.value());
                 } else {
-                    break;
+                    std::cerr << "Failed to receive message" << std::endl;
                 }
             }
 
             // Обработка пользовательских команд
-            std::string request;
-            std::getline(std::cin, request);
+            fd_set readfds;
+            FD_ZERO(&readfds);
+            FD_SET(STDIN_FILENO, &readfds);
+            struct timeval timeout = {0, 0}; // Немедленное возвращение
+            if (select(STDIN_FILENO + 1, &readfds, nullptr, nullptr, &timeout) > 0) {
+                std::string request;
+                std::getline(std::cin, request);
 
-            std::cout << "Processing user request: " << request << std::endl;
-            process_user_command(request);
+                std::cout << "Processing user request: " << request << std::endl;
+                process_user_command(request);
+            }
         }
 
         for (auto& future : futures) {
             future.get();
         }
+    }
+
+
+    ~ControlNode() {
+        std::cout << "Destroing System..." << std::endl;
+        Send(socket, "recursive_destroy");
+        socket.disconnect("tcp://localhost:" + port);
+        std::cout << "System destroyed." << std::endl;
     }
 };

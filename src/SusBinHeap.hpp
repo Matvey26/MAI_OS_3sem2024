@@ -62,10 +62,10 @@ public:
     }
 
     std::string get_path_to(int id) {
-        if (!find(id)) return ""; // ID не найден в куче
+        if (!find(id) or id2pos[id] == 0) return "";
 
         // Создаём строку, в которой сохранится путь
-        int len = std::log2(id2pos[id] + 1) + 1;
+        int len = std::log2(id2pos[id] + 1);
         std::string path(len, ' '); // Инициализируем строку пробелами
 
         // Проходимся вверх по куче и сохраняем путь

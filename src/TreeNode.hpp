@@ -6,6 +6,7 @@
 #include <string>
 #include <future>
 #include <vector>
+#include <sstream>
 
 #include "SocketCommunication.hpp"
 #include "Utils.hpp"
@@ -19,94 +20,155 @@ private:
 
     zmq::context_t context;
 
-    // std::vector<std::future<void>>     
+    zmq::pollitem_t ps;
+    zmq::pollitem_t ls;
+    zmq::pollitem_t rs;
 
     bool running;
 
 private:
-    void proccess_message(const std::string& message) {
+    void process_message(const std::string& message) {
+        if (message == "recursive_destroy") {
+            running = false;
+            if (left_socket.has_value()) {
+                Send(left_socket.value(), "recursive_destroy");
+                left_socket = std::nullopt;
+            }
+            if (right_socket.has_value()) {
+                Send(right_socket.value(), "recursive_destroy");
+                right_socket = std::nullopt;
+            }
 
+            return;
+        }
+        std::vector<std::string> tokens = split(message, ';');
+        std::string request_id = tokens[0];
+        std::string cmd = tokens[1];
+        std::string path = tokens[2];
+        std::string id = tokens[3];
+
+        if (path.size() != 0) {
+            tokens[2] = path.substr(1, path.size() - 1);
+
+            if (path[0] == 'l' and left_socket.has_value()) {
+                Send(left_socket.value(), join(tokens, ";"));
+            } else if (path[0] == 'r' and right_socket.has_value()) {
+                Send(left_socket.value(), join(tokens, ";"));
+            } else {
+                Send(parent_socket.value(), join({request_id, "Error: Not found"}, ";"));
+            }
+        }
+
+        if (cmd == "ping") {
+            Send(parent_socket.value(), join({request_id, "Ok: 1"}, ";"));
+        } else if (cmd == "bind") {
+            std::string side = tokens[4];
+            std::string port = tokens[5];
+            if (side == "left") {
+                setup_left_socket(port);
+            } else if (side == "right") {
+                setup_right_socket(port);
+            }
+            Send(parent_socket.value(), join({request_id, "Ok: Binded"}, ";"));
+        } else if (cmd == "exec") {
+            std::stringstream iss(tokens[4]);
+            int n;
+            iss >> n;
+            int sum = 0;
+            for (int i = 0; i < n; ++i) {
+                int cur;
+                iss >> cur;
+                sum += cur;
+            }
+            std::string message = "Ok:" + std::to_string(this->id) + ": " + std::to_string(sum);
+            Send(parent_socket.value(), join({request_id, message}, ";"));
+        } else {
+            Send(parent_socket.value(), join({request_id, "Error: Unknown command"}, ";"));
+        }
     }
 
 public:
-    TreeNode(int node_id) : id(node_id), context(1) {}
+    TreeNode(int node_id) : id(node_id), context(1), running(true) {}
 
     void setup_parent_socket(const std::string& port) {
         if (!parent_socket.has_value()) {
-            parent_socket.emplace(context, zmq::socket_type::pair);
-            parent_socket->connect("tcp://localhost:" + port);
-            std::cout << "Parent socket connected to tcp://localhost:" << port << std::endl;
+            parent_socket.emplace(context, ZMQ_PAIR);
+            parent_socket->bind("tcp://*:" + port);
+            ps = zmq::pollitem_t{parent_socket.value(), 0, ZMQ_POLLIN, 0};
+            std::cout << "Parent socket connected to tcp://*:" << port << std::endl;
         }
     }
 
     void setup_left_socket(const std::string& port) {
         if (!left_socket.has_value()) {
-            left_socket.emplace(context, zmq::socket_type::pair);
-            left_socket->bind("tcp://*:" + port);
-            std::cout << "Left socket bound to tcp://*:" << port << std::endl;
+            left_socket.emplace(context, ZMQ_PAIR);
+            left_socket->connect("tcp://localhost:" + port);
+            ls = zmq::pollitem_t{left_socket.value(), 0, ZMQ_POLLIN, 0};
+            std::cout << "Left socket bound to tcp://localhost:" << port << std::endl;
         }
     }
 
     void setup_right_socket(const std::string& port) {
         if (!right_socket.has_value()) {
-            right_socket.emplace(context, zmq::socket_type::pair);
-            right_socket->bind("tcp://*:" + port);
-            std::cout << "Right socket bound to tcp://*:" << port << std::endl;
+            right_socket.emplace(context, ZMQ_PAIR);
+            right_socket->connect("tcp://localhost:" + port);
+            rs = zmq::pollitem_t{right_socket.value(), 0, ZMQ_POLLIN, 0};
+            std::cout << "Right socket bound to tcp://localhost:" << port << std::endl;
         }
     }
 
     void run() {
         while (running) {
-            // Обработка сообщений от узлов
-            while (parent_socket.has_value()) {
-                std::optional<std::string> message = Receive(parent_socket.value());
-                if (message.has_value()) {
-                    proccess_message(message.value()); 
-                } else {
-                    break;
+            // Обработка сообщений от родителя
+            if (parent_socket.has_value()) {
+                zmq::pollitem_t items[] = {ps};
+                zmq::poll(items, 1, std::chrono::milliseconds(500));
+
+                if (items[0].revents & ZMQ_POLLIN) {
+                    std::optional<std::string> message = Receive(parent_socket.value());
+                    if (message.has_value()) {
+                        std::cout << "[COMP_NODE] Processing " << message.value() << std::endl;
+                        process_message(message.value());
+                    }
                 }
             }
 
-            // Пересылаем сообщения от детей к родителю
-            while (left_socket.has_value()) {
-                std::optional<std::string> message = Receive(left_socket.value());
-                if (message.has_value()) {
-                    Send(parent_socket.value(), message.value());
-                } else {
-                    break;
+            // Пересылаем сообщения от левого дочернего узла к родителю
+            if (left_socket.has_value()) {
+                zmq::pollitem_t items[] = {ls};
+                zmq::poll(items, 1, std::chrono::milliseconds(500));
+
+                if (items[0].revents & ZMQ_POLLIN) {
+                    std::optional<std::string> message = Receive(left_socket.value());
+                    if (message.has_value()) {
+                        std::cout << "[COMP_NODE] Resend " << message.value() << std::endl;
+                        Send(parent_socket.value(), message.value());
+                    }
                 }
             }
 
-            // Пересылаем сообщения от детей к родителю
-            while (right_socket.has_value()) {
-                std::optional<std::string> message = Receive(right_socket.value());
-                if (message.has_value()) {
-                    Send(parent_socket.value(), message.value());
-                } else {
-                    break;
+            // Пересылаем сообщения от правого дочернего узла к родителю
+            if (right_socket.has_value()) {
+                zmq::pollitem_t items[] = {rs};
+                zmq::poll(items, 1, std::chrono::milliseconds(500));
+
+                if (items[0].revents & ZMQ_POLLIN) {
+                    std::optional<std::string> message = Receive(right_socket.value());
+                    if (message.has_value()) {
+                        std::cout << "[COMP_NODE] Resend " << message.value() << std::endl;
+                        Send(parent_socket.value(), message.value());
+                    }
                 }
             }
         }
+    }
 
-        // for (auto& future : futures) {
-        //     future.get();
-        // }
+
+    ~TreeNode() {
+        std::cout << "Destroying Node " << std::to_string(id) << std::endl;
+        if (left_socket.has_value())
+            Send(left_socket.value(), "recursive_destroy");
+        if (right_socket.has_value())
+            Send(right_socket.value(), "recursive_destroy");
     }
 };
-
-// int main() {
-//     TreeNode parent(1);
-//     TreeNode leftChild(2);
-//     TreeNode rightChild(3);
-
-//     // Пример настройки сокетов для узлов
-//     parent.setup_parent_socket("5555");
-//     parent.setup_left_socket("5556");
-//     parent.setup_right_socket("5557");
-
-//     // Пример подключения дочерних узлов к родительскому узлу
-//     leftChild.setup_parent_socket("5556");
-//     rightChild.setup_parent_socket("5557");
-
-//     return 0;
-// }

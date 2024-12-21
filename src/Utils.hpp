@@ -17,7 +17,7 @@ int generate_request_id() {
 
 
 std::string get_free_port() {
-    static int counter = 1024;
+    static int counter = 5555;
     if (counter >= 65535) {
         throw std::runtime_error("All ports is busy.");
     }

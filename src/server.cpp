@@ -1,7 +1,7 @@
 #include "ControlNode.hpp"
 
 int main() {
-    ControlNode controller("5555");
+    ControlNode controller("1024");
 
     controller.run();
 }

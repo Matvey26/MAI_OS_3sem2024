@@ -4,9 +4,14 @@
 #include <optional>
 #include <iostream>
 #include <string>
+#include <future>
+#include <vector>
+
+#include "SocketCommunication.hpp"
+#include "Utils.hpp"
 
 class TreeNode {
-public:
+private:
     int id;
     std::optional<zmq::socket_t> parent_socket;
     std::optional<zmq::socket_t> left_socket;
@@ -14,6 +19,16 @@ public:
 
     zmq::context_t context;
 
+    // std::vector<std::future<void>>     
+
+    bool running;
+
+private:
+    void proccess_message(const std::string& message) {
+
+    }
+
+public:
     TreeNode(int node_id) : id(node_id), context(1) {}
 
     void setup_parent_socket(const std::string& port) {
@@ -38,6 +53,44 @@ public:
             right_socket->bind("tcp://*:" + port);
             std::cout << "Right socket bound to tcp://*:" << port << std::endl;
         }
+    }
+
+    void run() {
+        while (running) {
+            // Обработка сообщений от узлов
+            while (parent_socket.has_value()) {
+                std::optional<std::string> message = Receive(parent_socket.value());
+                if (message.has_value()) {
+                    proccess_message(message.value()); 
+                } else {
+                    break;
+                }
+            }
+
+            // Пересылаем сообщения от детей к родителю
+            while (left_socket.has_value()) {
+                std::optional<std::string> message = Receive(left_socket.value());
+                if (message.has_value()) {
+                    Send(parent_socket.value(), message.value());
+                } else {
+                    break;
+                }
+            }
+
+            // Пересылаем сообщения от детей к родителю
+            while (right_socket.has_value()) {
+                std::optional<std::string> message = Receive(right_socket.value());
+                if (message.has_value()) {
+                    Send(parent_socket.value(), message.value());
+                } else {
+                    break;
+                }
+            }
+        }
+
+        // for (auto& future : futures) {
+        //     future.get();
+        // }
     }
 };
 

@@ -177,7 +177,7 @@ private:
     void receive_messages() {
         while (running) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            try {
+            try {я
                 if (!response_connection or response_connection->empty()) continue;
                 std::string raw_message = response_connection->receive();
                 if (!raw_message.empty()) {

@@ -38,13 +38,6 @@ bool Send(zmq::socket_t& receiver, std::string message) {
     return result;
 }
 
-bool SafeSend(zmq::socket_t& primary_socket, const std::string& message, zmq::socket_t& fallback_socket, const std::string& error_message) {
-    if (!Send(primary_socket, message)) {
-        return Send(fallback_socket, error_message);
-    }
-    return true;
-}
-
 std::optional<std::string> Receive(zmq::socket_t& sender) {
     zmq::message_t request;
     if (sender.recv(request, zmq::recv_flags::none).has_value()) {

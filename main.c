@@ -67,14 +67,14 @@ void* sum_array(void* arg) {
 
 int main(int argc, char* argv[]) {
     if (argc < 3) {
-        fprintf(stderr, "Usage: %s <number of arrays> <length of arrays> <number of threads>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <number of threads> <number of arrays> <length of arrays>\n", argv[0]);
         return 1;
     }
 
-    size_t threads_numbers = atoi(argv[3]);
+    size_t threads_numbers = atoi(argv[1]);
 
-    size_t k = atoll(argv[1]);
-    size_t m = atoll(argv[2]);
+    size_t k = atoll(argv[2]);
+    size_t m = atoll(argv[3]);
 
     int result = 0;
     pthread_mutex_t mutex;

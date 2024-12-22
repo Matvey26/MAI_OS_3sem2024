@@ -5,7 +5,7 @@ gcc main.c -o main
 # Функция, чтобы замерять время исполнения программы для разного числа потоков
 function get_exec_time {
     local start_time=$(date +%s%3N)
-    ./main 1000000 10 $1
+    ./main $1 1000000 10
     local end_time=$(date +%s%3N)
     echo $((end_time-start_time)) 
 }
@@ -14,9 +14,9 @@ function get_exec_time {
 T1=$(get_exec_time 1)
 echo "Количество потоков: 1, Время исполнения: $T1"
 
-for p in {2..50}; do
+for p in {2..8}; do
     Tp=$(get_exec_time $p)
-    Sp=$(echo "scale=2; $T1 / $Tp" | bc)
-    Xp=$(echo "scale=2; $Sp / $p" | bc)
+    Sp=$(echo "scale=2; $T1 / $Tp" | bc)  # Ускорение
+    Xp=$(echo "scale=2; $Sp / $p" | bc)  # Эффективность
     echo "Количество потоков: $p, Ускорение: $Sp, Эффективность: $Xp, Время исполнения: $Tp" 
 done

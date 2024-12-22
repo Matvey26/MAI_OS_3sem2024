@@ -198,7 +198,6 @@ public:
         socket.set(zmq::sockopt::linger, 2000);   // Удаление сообщений, если отправить нельзя
         socket.set(zmq::sockopt::rcvtimeo, 2000); // Тайм-аут на прием
         socket.set(zmq::sockopt::sndtimeo, 2000); // Тайм-аут на отправку
-
     }
 
     void run() {
